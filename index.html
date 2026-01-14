@@ -1,26 +1,16 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="UTF-8">
 <title>Online Chess</title>
 
-<!-- Chessboard CSS -->
 <link rel="stylesheet"
 href="https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/chessboard-1.0.0.min.css"/>
 
 <style>
-body {
-  font-family: Arial;
-  text-align: center;
-}
-#board {
-  width: 320px;
-  margin: 20px auto;
-}
-#status {
-  font-weight: bold;
-  margin-top: 10px;
-}
+body { font-family: Arial; text-align: center; }
+#board { width: 320px; margin: 20px auto; }
+#status { font-weight: bold; margin-top: 10px; }
 </style>
 </head>
 
@@ -30,16 +20,15 @@ body {
 <div id="status">Connecting...</div>
 <div id="board"></div>
 
-<!-- Libraries -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/1.0.0/chess.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/chessboard-1.0.0.min.js"></script>
 
 <script type="module">
-/* ================= FIREBASE ================= */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
 import { getDatabase, ref, set, push, onValue, update } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js";
 
+/* 🔥 Firebase */
 const firebaseConfig = {
   apiKey: "AIzaSyACIKwrp-KV6o2vRM6adXESjU1-OpbVscc",
   authDomain: "cess-cb730.firebaseapp.com",
@@ -54,74 +43,85 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getDatabase(app);
 
-/* ================= GAME VARS ================= */
+/* GAME */
 let game = new Chess();
 let board;
 let myColor = "white";
-let roomId;
+let roomId = null;
 let uid;
+let onlineMode = false;
 
-/* ================= AUTH ================= */
+/* AUTH */
 signInAnonymously(auth).then(res => {
   uid = res.user.uid;
-  findOrCreateRoom();
+  searchRoomWithTimeout();
 });
 
-/* ================= ROOM LOGIC ================= */
-function findOrCreateRoom() {
+/* 🔍 SEARCH ROOM (5 sec) */
+function searchRoomWithTimeout() {
+  document.getElementById("status").innerText = "Searching opponent...";
+
   const roomsRef = ref(db, "rooms");
+  let found = false;
 
   onValue(roomsRef, snap => {
-    let joined = false;
+    if (found) return;
 
     snap.forEach(room => {
       const data = room.val();
       if (!data.black && data.white !== uid) {
+        found = true;
+        onlineMode = true;
         roomId = room.key;
         myColor = "black";
-        update(ref(db, "rooms/" + roomId), {
-          black: uid
-        });
-        joined = true;
+        update(ref(db, "rooms/" + roomId), { black: uid });
+        startOnlineGame();
       }
     });
-
-    if (!joined) {
-      const newRoom = push(roomsRef);
-      roomId = newRoom.key;
-      myColor = "white";
-      set(newRoom, {
-        white: uid,
-        fen: game.fen()
-      });
-    }
-
-    startGame();
   }, { onlyOnce: true });
+
+  setTimeout(() => {
+    if (!found) {
+      startSystemGame();
+    }
+  }, 5000);
 }
 
-/* ================= START GAME ================= */
-function startGame() {
+/* ▶️ ONLINE GAME */
+function startOnlineGame() {
   document.getElementById("status").innerText =
-    "You are " + myColor.toUpperCase();
+    "Online Game | You are " + myColor.toUpperCase();
 
+  initBoard();
+  listenMoves();
+}
+
+/* 🤖 SYSTEM GAME */
+function startSystemGame() {
+  document.getElementById("status").innerText =
+    "System Game | You vs Computer";
+
+  myColor = "white";
+  initBoard();
+}
+
+/* ♟️ BOARD */
+function initBoard() {
   board = Chessboard("board", {
     draggable: true,
     position: "start",
     orientation: myColor,
     onDrop: onDrop
   });
-
-  listenMoves();
 }
 
-/️}
-
-/* ================= MOVE ================= */
+/* MOVE */
 function onDrop(source, target) {
-  if ((game.turn() === "w" && myColor !== "white") ||
-      (game.turn() === "b" && myColor !== "black")) {
-    return "snapback";
+  if (onlineMode) {
+    if ((game.turn() === "w" && myColor !== "white") ||
+        (game.turn() === "b" && myColor !== "black")) {
+      return "snapback";
+    }
   }
 
   const move = game.move({
@@ -130,12 +130,27 @@ function onDrop(source, target) {
     promotion: "q"
   });
 
-  if (move === null) return "snapback";
+  if (!move) return "snapback";
 
-  set(ref(db, "rooms/" + roomId + "/fen"), game.fen());
+  board.position(game.fen());
+
+  if (onlineMode) {
+    set(ref(db, "rooms/" + roomId + "/fen"), game.fen());
+  } else {
+    setTimeout(systemMove, 500);
+  }
 }
 
-/* ================= LISTEN ================= */
+/* SYSTEM AI (Random) */
+function systemMove() {
+  if (game.game_over()) return;
+  const moves = game.moves();
+  const move = moves[Math.floor(Math.random() * moves.length)];
+  game.move(move);
+  board.position(game.fen());
+}
+
+/* LISTEN ONLINE */
 function listenMoves() {
   onValue(ref(db, "rooms/" + roomId + "/fen"), snap => {
     const fen = snap.val();
@@ -145,7 +160,7 @@ function listenMoves() {
     }
   });
 }
-
 </script>
+
 </body>
 </html>
