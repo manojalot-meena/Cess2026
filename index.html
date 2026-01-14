@@ -1,184 +1,101 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Auto Chess Dashboard</title>
-    <!-- अपडेटेड chessboard.css लिंक -->
-    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
-    <style>
-        body { font-family: Arial, sans-serif; text-align: center; background: #f5f5f5; margin: 0; padding: 20px; }
-        h2 { color: #333; }
-        button { font-size: 16px; padding: 10px 20px; margin: 10px; cursor: pointer; border: none; border-radius: 5px; background: #4CAF50; color: white; }
-        button:hover { background: #45a049; }
-        #status { font-weight: bold; margin-top: 10px; padding: 10px; background: white; border-radius: 5px; display: inline-block; }
-        #timer { margin-top: 10px; font-size: 16px; font-weight: bold; }
-        #board { width: 400px; margin: 20px auto; }
-        #controls { margin-top: 20px; }
-    </style>
+<meta charset="UTF-8">
+<title>Auto Chess Dashboard</title>
+<!-- Chessboard.js beta 1.0.0-beta.6 -->
+<link rel="stylesheet" href="https://unpkg.com/chessboardjs@1.0.0-beta.6/dist/chessboard-1.0.0.min.css"/>
+<style>
+body { font-family: Arial; text-align: center; background:#f5f5f5; }
+#board { width: 320px; margin: 20px auto; }
+#status { font-weight:bold; margin-top:10px; }
+#timer { margin-top:10px; font-size:16px; }
+</style>
 </head>
 <body>
 
 <h2>♟️ Chess Dashboard</h2>
 
 <div id="status">Loading game...</div>
-<div id="timer">White: 10:00 | Black: 10:00</div>
+<div id="timer"></div>
 <div id="board"></div>
 
-<div id="controls">
-    <button onclick="startSystemGame()">🔄 New Game vs System</button>
-</div>
+<!-- Libraries -->
+<script src="https://unpkg.com/chess.js@1.0.0-beta.9/chess.js"></script>
+<script src="https://unpkg.com/chessboardjs@1.0.0-beta.6/dist/chessboard-1.0.0.min.js"></script>
 
-<!-- अपडेटेड लाइब्रेरी लिंक्स -->
-<script src="https://unpkg.com/chess.js@1.0.0-beta.9/dist/chess.min.js"></script>
-<script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+<script>
+let game, board;
+let whiteTime = 600, blackTime = 600; // 10 min
+let timerInterval;
 
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
-import { getDatabase } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js";
-
-// Firebase config (आपका original config)
-const firebaseConfig = {
-  apiKey: "AIzaSyACIKwrp-KV6o2vRM6adXESjU1-OpbVscc",
-  authDomain: "cess-cb730.firebaseapp.com",
-  databaseURL: "https://cess-cb730-default-rtdb.firebaseio.com",
-  projectId: "cess-cb730",
-  storageBucket: "cess-cb730.firebasestorage.app",
-  messagingSenderId: "324360812002",
-  appId: "1:324360812002:web:6a9bedb2cfc67db41a75bb"
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getDatabase(app);
-
-let uid, game, board, myColor = "white";
-let timerInterval, whiteTime = 600, blackTime = 600; // 600 seconds = 10 minutes
-
-const statusEl = document.getElementById("status");
-const timerEl = document.getElementById("timer");
-
-// Anonymous authentication
-signInAnonymously(auth)
-.then(res => {
-  uid = res.user.uid;
-  console.log("Logged in UID:", uid);
-  startSystemGame(); // Automatically start a game against the system
-})
-.catch(err => {
-  console.log("Auth Error:", err);
-  statusEl.innerText = "Authentication Error - Starting Offline Game";
-  startSystemGame(); // Fallback: start game even if auth fails
-});
-
-// ==================== Initialize Board ====================
-function initBoard() {
+// Auto start System Game
+function initBoard(){
   game = new Chess();
-  board = Chessboard('board', {
+  board = Chessboard("board", {
     draggable: true,
-    position: 'start',
-    orientation: myColor,
+    position: "start",
+    orientation: "white",
     onDrop: onDrop
   });
   updateStatus();
   startTimer();
 }
 
-// ==================== Start System Game ====================
-function startSystemGame() {
-  myColor = "white";
-  statusEl.innerText = "System Game | You (White) vs Computer | Playing...";
-  whiteTime = 600;
-  blackTime = 600;
-  if (timerInterval) clearInterval(timerInterval);
-  initBoard();
-}
-
-// ==================== Handle Piece Drop ====================
-function onDrop(source, target) {
-  // Validate move
-  const move = game.move({
-    from: source,
-    to: target,
-    promotion: 'q' // Always promote to queen for simplicity
-  });
-
-  if (move === null) return 'snapback'; // Invalid move
-
+function onDrop(source, target){
+  const move = game.move({from: source, to: target, promotion: 'q'});
+  if(!move) return "snapback";
   board.position(game.fen());
   updateStatus();
-
-  // System makes a move after a short delay
-  if (!game.game_over()) {
-    setTimeout(systemMove, 500);
-  }
+  setTimeout(systemMove, 500); // AI move
 }
 
-// ==================== System AI Move ====================
-function systemMove() {
-  if (game.game_over()) return;
-
+function systemMove(){
+  if(game.game_over()) return;
   const moves = game.moves();
-  if (moves.length === 0) return;
-
-  const randomMove = moves[Math.floor(Math.random() * moves.length)];
-  game.move(randomMove);
+  const move = moves[Math.floor(Math.random()*moves.length)];
+  game.move(move);
   board.position(game.fen());
   updateStatus();
 }
 
-// ==================== Update Game Status ====================
-function updateStatus() {
-  if (game.game_over()) {
-    if (game.in_checkmate()) {
-      const winner = game.turn() === 'w' ? 'Black' : 'White';
-      statusEl.innerText = `Checkmate! ${winner} wins.`;
-    } else if (game.in_draw()) {
-      statusEl.innerText = 'Game drawn.';
-    } else if (game.in_stalemate()) {
-      statusEl.innerText = 'Stalemate!';
-    } else {
-      statusEl.innerText = 'Game over.';
-    }
+function updateStatus(){
+  let status = '';
+  let moveColor = game.turn() === 'w' ? 'White' : 'Black';
+
+  if(game.in_checkmate()){
+    status = 'Checkmate! ' + (moveColor==='White'?'Black':'White') + ' wins.';
     stopTimer();
-    return;
+  } else if(game.in_draw() || game.in_stalemate() || game.in_threefold_repetition()){
+    status = 'Draw!';
+    stopTimer();
+  } else{
+    status = 'Playing... ' + moveColor + ' to move';
   }
-
-  const moveColor = game.turn() === 'w' ? 'White' : 'Black';
-  const status = `${moveColor} to move`;
-  statusEl.innerText = game.in_check() ? `${status} (Check!)` : status;
+  document.getElementById('status').innerText = status;
 }
 
-// ==================== Timer Functions ====================
-function startTimer() {
-  timerInterval = setInterval(() => {
-    if (game.turn() === 'w') {
-      whiteTime--;
-    } else {
-      blackTime--;
+function startTimer(){
+  timerInterval = setInterval(()=>{
+    if(game.turn()==='w') whiteTime--; else blackTime--;
+    document.getElementById('timer').innerText = `White: ${formatTime(whiteTime)} | Black: ${formatTime(blackTime)}`;
+    if(whiteTime<=0 || blackTime<=0){
+      clearInterval(timerInterval);
+      document.getElementById('status').innerText = (whiteTime<=0?'White':'Black') + ' time over. Game Over';
     }
-
-    timerEl.innerText = `White: ${formatTime(whiteTime)} | Black: ${formatTime(blackTime)}`;
-
-    if (whiteTime <= 0) {
-      statusEl.innerText = "White's time is up! Black wins.";
-      stopTimer();
-    } else if (blackTime <= 0) {
-      statusEl.innerText = "Black's time is up! White wins.";
-      stopTimer();
-    }
-  }, 1000);
+  },1000);
 }
 
-function stopTimer() {
-  clearInterval(timerInterval);
+function stopTimer(){ clearInterval(timerInterval); }
+
+function formatTime(sec){
+  let m = Math.floor(sec/60);
+  let s = sec % 60;
+  return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
 }
 
-function formatTime(seconds) {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-}
+// Auto start
+window.onload = initBoard;
 </script>
 </body>
 </html>
