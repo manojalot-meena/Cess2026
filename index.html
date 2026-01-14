@@ -1,37 +1,43 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Auto Chess Dashboard</title>
-<link rel="stylesheet"
-href="https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/chessboard-1.0.0.min.css"/>
-<style>
-body { font-family: Arial; text-align: center; background:#f5f5f5; }
-#dashboard { margin-top:30px; display:none; } /* hide dashboard since auto start */
-button { font-size:16px; padding:10px 20px; margin:10px; cursor:pointer; }
-#board { width: 320px; margin: 20px auto; }
-#status { font-weight:bold; margin-top:10px; }
-#timer { margin-top:10px; font-size:16px; }
-</style>
+    <meta charset="UTF-8">
+    <title>Auto Chess Dashboard</title>
+    <!-- अपडेटेड chessboard.css लिंक -->
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #f5f5f5; margin: 0; padding: 20px; }
+        h2 { color: #333; }
+        button { font-size: 16px; padding: 10px 20px; margin: 10px; cursor: pointer; border: none; border-radius: 5px; background: #4CAF50; color: white; }
+        button:hover { background: #45a049; }
+        #status { font-weight: bold; margin-top: 10px; padding: 10px; background: white; border-radius: 5px; display: inline-block; }
+        #timer { margin-top: 10px; font-size: 16px; font-weight: bold; }
+        #board { width: 400px; margin: 20px auto; }
+        #controls { margin-top: 20px; }
+    </style>
 </head>
 <body>
 
 <h2>♟️ Chess Dashboard</h2>
 
 <div id="status">Loading game...</div>
-<div id="timer"></div>
+<div id="timer">White: 10:00 | Black: 10:00</div>
 <div id="board"></div>
 
-<!-- Libraries -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/1.0.0/chess.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/chessboard-1.0.0.min.js"></script>
+<div id="controls">
+    <button onclick="startSystemGame()">🔄 New Game vs System</button>
+</div>
+
+<!-- अपडेटेड लाइब्रेरी लिंक्स -->
+<script src="https://unpkg.com/chess.js@1.0.0-beta.9/dist/chess.min.js"></script>
+<script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
-import { getDatabase, ref, set, push, onValue, update, get } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js";
+import { getDatabase } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js";
 
-// Firebase config
+// Firebase config (आपका original config)
 const firebaseConfig = {
   apiKey: "AIzaSyACIKwrp-KV6o2vRM6adXESjU1-OpbVscc",
   authDomain: "cess-cb730.firebaseapp.com",
@@ -46,108 +52,132 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getDatabase(app);
 
-// Variables
-let uid, game, board, myColor="white", roomId, onlineMode=false;
-let timerInterval, whiteTime=600, blackTime=600; // 10 min each
+let uid, game, board, myColor = "white";
+let timerInterval, whiteTime = 600, blackTime = 600; // 600 seconds = 10 minutes
 
 const statusEl = document.getElementById("status");
-const boardDiv = document.getElementById("board");
 const timerEl = document.getElementById("timer");
 
-// Auth anonymous
+// Anonymous authentication
 signInAnonymously(auth)
 .then(res => {
   uid = res.user.uid;
   console.log("Logged in UID:", uid);
-  startSystemGame(); // auto start system game immediately
+  startSystemGame(); // Automatically start a game against the system
 })
-.catch(err => { console.log("Auth Error:", err); statusEl.innerText="Auth Error"; });
+.catch(err => {
+  console.log("Auth Error:", err);
+  statusEl.innerText = "Authentication Error - Starting Offline Game";
+  startSystemGame(); // Fallback: start game even if auth fails
+});
 
-// ==================== Init Board ====================
-function initBoard(){
+// ==================== Initialize Board ====================
+function initBoard() {
   game = new Chess();
-  board = Chessboard("board",{
-    draggable:true,
-    position:"start",
-    orientation:myColor,
-    onDrop:onDrop
+  board = Chessboard('board', {
+    draggable: true,
+    position: 'start',
+    orientation: myColor,
+    onDrop: onDrop
   });
   updateStatus();
   startTimer();
 }
 
-// ==================== System Game ====================
-function startSystemGame(){
-  onlineMode=false;
-  myColor="white";
-  statusEl.innerText="System Game | You vs Computer | Playing...";
+// ==================== Start System Game ====================
+function startSystemGame() {
+  myColor = "white";
+  statusEl.innerText = "System Game | You (White) vs Computer | Playing...";
+  whiteTime = 600;
+  blackTime = 600;
+  if (timerInterval) clearInterval(timerInterval);
   initBoard();
 }
 
-// ==================== Moves ====================
-function onDrop(source,target){
-  if(onlineMode){
-    if((game.turn()==="w" && myColor!=="white") ||
-       (game.turn()==="b" && myColor!=="black")) return "snapback";
-  }
+// ==================== Handle Piece Drop ====================
+function onDrop(source, target) {
+  // Validate move
+  const move = game.move({
+    from: source,
+    to: target,
+    promotion: 'q' // Always promote to queen for simplicity
+  });
 
-  const move = game.move({from:source,to:target,promotion:'q'});
-  if(!move) return "snapback";
+  if (move === null) return 'snapback'; // Invalid move
+
   board.position(game.fen());
   updateStatus();
 
-  if(!onlineMode){
-    setTimeout(systemMove,500);
+  // System makes a move after a short delay
+  if (!game.game_over()) {
+    setTimeout(systemMove, 500);
   }
 }
 
-// ==================== System AI ====================
-function systemMove(){
-  if(game.game_over()) return;
+// ==================== System AI Move ====================
+function systemMove() {
+  if (game.game_over()) return;
+
   const moves = game.moves();
-  const move = moves[Math.floor(Math.random()*moves.length)];
-  game.move(move);
+  if (moves.length === 0) return;
+
+  const randomMove = moves[Math.floor(Math.random() * moves.length)];
+  game.move(randomMove);
   board.position(game.fen());
   updateStatus();
 }
 
-// ==================== Status & Win Check ====================
-function updateStatus(){
-  let status = '';
-  let moveColor = game.turn() === 'w' ? 'White' : 'Black';
-
-  if(game.in_checkmate()){
-    status = 'Checkmate! ' + (moveColor==='White'?'Black':'White') + ' wins.';
-    stopTimer();
-  } else if(game.in_draw() || game.in_stalemate() || game.in_threefold_repetition()){
-    status = 'Draw!';
-    stopTimer();
-  } else{
-    status = 'Playing... ' + moveColor + ' to move';
-  }
-  statusEl.innerText = status;
-}
-
-// ==================== Timer ====================
-function startTimer(){
-  timerInterval = setInterval(()=>{
-    if(game.turn()==='w') whiteTime--; else blackTime--;
-    timerEl.innerText = `White: ${formatTime(whiteTime)} | Black: ${formatTime(blackTime)}`;
-    if(whiteTime<=0 || blackTime<=0){
-      clearInterval(timerInterval);
-      statusEl.innerText = (whiteTime<=0?'White':'Black') + ' time over. Game Over';
+// ==================== Update Game Status ====================
+function updateStatus() {
+  if (game.game_over()) {
+    if (game.in_checkmate()) {
+      const winner = game.turn() === 'w' ? 'Black' : 'White';
+      statusEl.innerText = `Checkmate! ${winner} wins.`;
+    } else if (game.in_draw()) {
+      statusEl.innerText = 'Game drawn.';
+    } else if (game.in_stalemate()) {
+      statusEl.innerText = 'Stalemate!';
+    } else {
+      statusEl.innerText = 'Game over.';
     }
-  },1000);
+    stopTimer();
+    return;
+  }
+
+  const moveColor = game.turn() === 'w' ? 'White' : 'Black';
+  const status = `${moveColor} to move`;
+  statusEl.innerText = game.in_check() ? `${status} (Check!)` : status;
 }
 
-function stopTimer(){
+// ==================== Timer Functions ====================
+function startTimer() {
+  timerInterval = setInterval(() => {
+    if (game.turn() === 'w') {
+      whiteTime--;
+    } else {
+      blackTime--;
+    }
+
+    timerEl.innerText = `White: ${formatTime(whiteTime)} | Black: ${formatTime(blackTime)}`;
+
+    if (whiteTime <= 0) {
+      statusEl.innerText = "White's time is up! Black wins.";
+      stopTimer();
+    } else if (blackTime <= 0) {
+      statusEl.innerText = "Black's time is up! White wins.";
+      stopTimer();
+    }
+  }, 1000);
+}
+
+function stopTimer() {
   clearInterval(timerInterval);
 }
 
-function formatTime(sec){
-  let m = Math.floor(sec/60);
-  let s = sec%60;
-  return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 </script>
 </body>
