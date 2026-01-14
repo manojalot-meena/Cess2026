@@ -2,10 +2,10 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Online Chess - Firebase</title>
+<title>Online Chess</title>
 
-<!-- Chess Board -->
-<link rel="stylesheet" href="https://unpkg.com/chessboardjs/dist/chessboard-1.0.0.min.css">
+<link rel="stylesheet"
+ href="https://unpkg.com/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
 
 <style>
 body {
@@ -18,7 +18,6 @@ body {
   margin: 20px auto;
 }
 #status {
-  margin-top: 10px;
   font-weight: bold;
 }
 </style>
@@ -27,90 +26,133 @@ body {
 <body>
 
 <h2>♟️ Online Chess</h2>
-<div id="board"></div>
 <div id="status">Connecting...</div>
+<div id="board"></div>
 
-<!-- Firebase -->
+<!-- Chess libs (NON module) -->
+<script src="https://unpkg.com/chess.js@1.0.0/chess.min.js"></script>
+<script src="https://unpkg.com/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+
+<!-- Firebase + Game (MODULE) -->
 <script type="module">
-  // 🔹 Firebase core
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 
-  // 🔹 Auth (Anonymous)
-  import { 
-    getAuth, 
-    signInAnonymously 
-  } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+import { getAuth, signInAnonymously }
+  from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+import { getDatabase, ref, push, set, update, onValue, get }
+  from "https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js";
 
-  // 🔹 Realtime Database
-  import { 
-    getDatabase, 
-    ref, 
-    push, 
-    set, 
-    update, 
-    onValue, 
-    get 
-  } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js";
+const statusEl = document.getElementById("status");
 
-  // 🔹 Firebase config
-  const firebaseConfig = {
-    apiKey: "AIzaSyACIKwrp-KV6o2vRM6adXESjU1-OpbVscc",
-    authDomain: "cess-cb730.firebaseapp.com",
-    databaseURL: "https://cess-cb730-default-rtdb.firebaseio.com",
-    projectId: "cess-cb730",
-    storageBucket: "cess-cb730.firebasestorage.app",
-    messagingSenderId: "324360812002",
-    appId: "1:324360812002:web:6a9bedb2cfc67db41a75bb"
-  };
+// 🔥 Firebase config
+const firebaseConfig = {
+  apiKey: "AIzaSyACIKwrp-KV6o2vRM6adXESjU1-OpbVscc",
+  authDomain: "cess-cb730.firebaseapp.com",
+  databaseURL: "https://cess-cb730-default-rtdb.firebaseio.com",
+  projectId: "cess-cb730",
+  storageBucket: "cess-cb730.firebasestorage.app",
+  messagingSenderId: "324360812002",
+  appId: "1:324360812002:web:6a9bedb2cfc67db41a75bb"
+};
 
-  // 🔹 Init
-  const app = initializeApp(firebaseConfig);
-  const auth = getAuth(app);
-  const db = getDatabase(app);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getDatabase(app);
 
-  let uid;
+let uid, roomId, myColor;
+let game = new Chess();
+let board;
 
-  // 🔐 Anonymous Login
-  signInAnonymously(auth).then(result => {
-    uid = result.user.uid;
-    console.log("Logged in:", uid);
-    joinRandomRoom();
+// 🔐 Login
+statusEl.innerText = "Signing in...";
+signInAnonymously(auth)
+.then(res => {
+  uid = res.user.uid;
+  statusEl.innerText = "Finding opponent...";
+  joinRoom();
+})
+.catch(err => {
+  statusEl.innerText = "Auth error: " + err.message;
+});
+
+// 🎲 Room logic
+async function joinRoom() {
+  const roomsRef = ref(db, "chessRooms");
+  const snap = await get(roomsRef);
+  let joined = false;
+
+  if (snap.exists()) {
+    snap.forEach(room => {
+      const r = room.val();
+      if (r.status === "waiting" && !r.black && !joined) {
+        roomId = room.key;
+        myColor = "black";
+        update(ref(db, "chessRooms/" + roomId), {
+          black: uid,
+          status: "playing"
+        });
+        joined = true;
+        startGame();
+      }
+    });
+  }
+
+  if (!joined) {
+    const newRoom = push(roomsRef);
+    roomId = newRoom.key;
+    myColor = "white";
+    set(newRoom, {
+      status: "waiting",
+      white: uid,
+      fen: "start",
+      turn: "w"
+    });
+    startGame();
+  }
+}
+
+// ♟️ Start
+function startGame() {
+  statusEl.innerText = "You are " + myColor.toUpperCase();
+
+  board = Chessboard("board", {
+    draggable: true,
+    position: "start",
+    orientation: myColor,
+    onDrop: onDrop
   });
 
-  // 🎲 Random Chess Room Join
-  async function joinRandomRoom() {
-    const roomsRef = ref(db, "chessRooms");
-    const snapshot = await get(roomsRef);
+  onValue(ref(db, "chessRooms/" + roomId), snap => {
+    const d = snap.val();
+    if (!d) return;
+    game.load(d.fen);
+    board.position(d.fen);
+  });
+}
 
-    let joined = false;
+// 🔄 Moves
+function onDrop(source, target) {
+  if (!myTurn()) return "snapback";
 
-    if (snapshot.exists()) {
-      snapshot.forEach(room => {
-        const data = room.val();
+  const move = game.move({
+    from: source,
+    to: target,
+    promotion: "q"
+  });
 
-        if (data.status === "waiting" && !data.black && !joined) {
-          update(ref(db, "chessRooms/" + room.key), {
-            black: uid,
-            status: "playing"
-          });
-          console.log("Joined room:", room.key);
-          joined = true;
-        }
-      });
-    }
+  if (move === null) return "snapback";
 
-    if (!joined) {
-      const newRoomRef = push(roomsRef);
-      set(newRoomRef, {
-        status: "waiting",
-        white: uid,
-        fen: "start",
-        turn: "w"
-      });
-      console.log("Created room:", newRoomRef.key);
-    }
-  }
+  update(ref(db, "chessRooms/" + roomId), {
+    fen: game.fen(),
+    turn: game.turn()
+  });
+}
+
+function myTurn() {
+  return (game.turn() === "w" && myColor === "white") ||
+         (game.turn() === "b" && myColor === "black");
+}
+
 </script>
-
 </body>
 </html>
