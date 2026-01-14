@@ -2,27 +2,24 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Chess Dashboard</title>
+<title>Auto Chess Dashboard</title>
 <link rel="stylesheet"
 href="https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/chessboard-1.0.0.min.css"/>
 <style>
 body { font-family: Arial; text-align: center; background:#f5f5f5; }
-#dashboard { margin-top:50px; }
+#dashboard { margin-top:30px; display:none; } /* hide dashboard since auto start */
 button { font-size:16px; padding:10px 20px; margin:10px; cursor:pointer; }
-#board { width: 320px; margin: 20px auto; display:none; }
+#board { width: 320px; margin: 20px auto; }
 #status { font-weight:bold; margin-top:10px; }
+#timer { margin-top:10px; font-size:16px; }
 </style>
 </head>
 <body>
 
 <h2>♟️ Chess Dashboard</h2>
 
-<div id="dashboard">
-  <button id="btnSystem">System Game | You vs Computer</button>
-  <button id="btnRandom">Random Online Player</button>
-</div>
-
-<div id="status"></div>
+<div id="status">Loading game...</div>
+<div id="timer"></div>
 <div id="board"></div>
 
 <!-- Libraries -->
@@ -50,84 +47,41 @@ const auth = getAuth(app);
 const db = getDatabase(app);
 
 // Variables
-let uid;
-let game;
-let board;
-let myColor;
-let roomId;
-let onlineMode = false;
+let uid, game, board, myColor="white", roomId, onlineMode=false;
+let timerInterval, whiteTime=600, blackTime=600; // 10 min each
 
-// DOM
-const btnSystem = document.getElementById("btnSystem");
-const btnRandom = document.getElementById("btnRandom");
 const statusEl = document.getElementById("status");
-const dashboard = document.getElementById("dashboard");
 const boardDiv = document.getElementById("board");
+const timerEl = document.getElementById("timer");
 
-// Auth
+// Auth anonymous
 signInAnonymously(auth)
-  .then(res => { uid = res.user.uid; console.log("Logged in UID:", uid); })
-  .catch(err => { console.log("Auth Error:", err); });
-
-// Button Events
-btnSystem.addEventListener("click", startSystemGame);
-btnRandom.addEventListener("click", startRandomGame);
+.then(res => {
+  uid = res.user.uid;
+  console.log("Logged in UID:", uid);
+  startSystemGame(); // auto start system game immediately
+})
+.catch(err => { console.log("Auth Error:", err); statusEl.innerText="Auth Error"; });
 
 // ==================== Init Board ====================
-function initBoard() {
+function initBoard(){
   game = new Chess();
-  boardDiv.style.display="block"; // Show board
   board = Chessboard("board",{
     draggable:true,
     position:"start",
     orientation:myColor,
     onDrop:onDrop
   });
+  updateStatus();
+  startTimer();
 }
 
 // ==================== System Game ====================
 function startSystemGame(){
-  onlineMode = false;
-  myColor = "white";
-  dashboard.style.display="none";
-  statusEl.innerText = "System Game | You vs Computer | Playing...";
+  onlineMode=false;
+  myColor="white";
+  statusEl.innerText="System Game | You vs Computer | Playing...";
   initBoard();
-}
-
-// ==================== Random Online Game ====================
-async function startRandomGame(){
-  onlineMode = true;
-  dashboard.style.display="none";
-  statusEl.innerText = "Searching opponent...";
-  myColor = "white"; // default
-  initBoard();
-
-  const roomsRef = ref(db,"rooms");
-  const snap = await get(roomsRef).catch(e=>{console.log(e)});
-  let found = false;
-
-  if(snap.exists()){
-    snap.forEach(room=>{
-      const data = room.val();
-      if(!data.black && data.white !== uid && !found){
-        found = true;
-        roomId = room.key;
-        myColor = "black";
-        update(ref(db,"rooms/"+roomId),{black:uid});
-        statusEl.innerText = "Online Game | You are BLACK | Playing...";
-      }
-    });
-  }
-
-  if(!found){
-    const newRoom = push(roomsRef);
-    roomId = newRoom.key;
-    myColor = "white";
-    await set(newRoom,{white:uid, fen:"start"});
-    statusEl.innerText = "Waiting for opponent | You are WHITE | Playing...";
-  }
-
-  listenMoves();
 }
 
 // ==================== Moves ====================
@@ -140,10 +94,9 @@ function onDrop(source,target){
   const move = game.move({from:source,to:target,promotion:'q'});
   if(!move) return "snapback";
   board.position(game.fen());
+  updateStatus();
 
-  if(onlineMode && roomId){
-    set(ref(db,"rooms/"+roomId+"/fen"),game.fen());
-  } else if(!onlineMode){
+  if(!onlineMode){
     setTimeout(systemMove,500);
   }
 }
@@ -155,21 +108,47 @@ function systemMove(){
   const move = moves[Math.floor(Math.random()*moves.length)];
   game.move(move);
   board.position(game.fen());
+  updateStatus();
 }
 
-// ==================== Listen Moves ====================
-function listenMoves(){
-  if(!roomId) return;
-  const fenRef = ref(db,"rooms/"+roomId+"/fen");
-  onValue(fenRef,snap=>{
-    const fen = snap.val();
-    if(fen && fen!==game.fen()){
-      game.load(fen);
-      board.position(game.fen());
+// ==================== Status & Win Check ====================
+function updateStatus(){
+  let status = '';
+  let moveColor = game.turn() === 'w' ? 'White' : 'Black';
+
+  if(game.in_checkmate()){
+    status = 'Checkmate! ' + (moveColor==='White'?'Black':'White') + ' wins.';
+    stopTimer();
+  } else if(game.in_draw() || game.in_stalemate() || game.in_threefold_repetition()){
+    status = 'Draw!';
+    stopTimer();
+  } else{
+    status = 'Playing... ' + moveColor + ' to move';
+  }
+  statusEl.innerText = status;
+}
+
+// ==================== Timer ====================
+function startTimer(){
+  timerInterval = setInterval(()=>{
+    if(game.turn()==='w') whiteTime--; else blackTime--;
+    timerEl.innerText = `White: ${formatTime(whiteTime)} | Black: ${formatTime(blackTime)}`;
+    if(whiteTime<=0 || blackTime<=0){
+      clearInterval(timerInterval);
+      statusEl.innerText = (whiteTime<=0?'White':'Black') + ' time over. Game Over';
     }
-  });
+  },1000);
+}
+
+function stopTimer(){
+  clearInterval(timerInterval);
+}
+
+function formatTime(sec){
+  let m = Math.floor(sec/60);
+  let s = sec%60;
+  return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
 }
 </script>
-
 </body>
 </html>
