@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Online Chess Dashboard</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/chessboard-1.0.0.min.css"/>
+<title>Chess Dashboard</title>
+<link rel="stylesheet"
+href="https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/chessboard-1.0.0.min.css"/>
 <style>
 body { font-family: Arial; text-align: center; background:#f5f5f5; }
 #dashboard { margin-top:50px; }
@@ -17,8 +18,8 @@ button { font-size:16px; padding:10px 20px; margin:10px; cursor:pointer; }
 <h2>♟️ Chess Dashboard</h2>
 
 <div id="dashboard">
-  <button id="btnRandom">Play Random Online</button>
-  <button id="btnSystem">Play vs System</button>
+  <button id="btnSystem">System Game | You vs Computer</button>
+  <button id="btnRandom">Random Online Player</button>
 </div>
 
 <div id="status"></div>
@@ -31,7 +32,7 @@ button { font-size:16px; padding:10px 20px; margin:10px; cursor:pointer; }
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
-import { getDatabase, ref, set, push, onValue, update, get } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js";
+import { getDatabase, ref, set, push, onValue, update } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js";
 
 // Firebase config
 const firebaseConfig = {
@@ -48,6 +49,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getDatabase(app);
 
+// Variables
 let uid;
 let game;
 let board;
@@ -55,44 +57,48 @@ let myColor;
 let roomId;
 let onlineMode = false;
 
-// Auth immediately (no waiting)
-signInAnonymously(auth)
-.then(res => {
-  uid = res.user.uid;
-  console.log("Logged in UID:", uid);
-})
-.catch(err => {
-  console.log("Auth Error:", err);
-});
-
-// DOM Elements
-const btnRandom = document.getElementById("btnRandom");
+// DOM
 const btnSystem = document.getElementById("btnSystem");
+const btnRandom = document.getElementById("btnRandom");
 const statusEl = document.getElementById("status");
+const dashboard = document.getElementById("dashboard");
 const boardDiv = document.getElementById("board");
 
-// Event Listeners
-btnSystem.addEventListener("click", ()=>startSystemGame());
-btnRandom.addEventListener("click", ()=>startRandomGame());
+// Auth
+signInAnonymously(auth)
+  .then(res => { uid = res.user.uid; console.log("Logged in UID:", uid); })
+  .catch(err => { console.log("Auth Error:", err); });
+
+// Button Events
+btnSystem.addEventListener("click", startSystemGame);
+btnRandom.addEventListener("click", startRandomGame);
+
+// ==================== Init Board ====================
+function initBoard() {
+  game = new Chess();
+  boardDiv.style.display="block";
+  board = Chessboard("board",{
+    draggable:true,
+    position:"start",
+    orientation:myColor,
+    onDrop:onDrop
+  });
+}
 
 // ==================== System Game ====================
 function startSystemGame(){
   onlineMode = false;
   myColor = "white";
-  statusEl.innerText = "System Game | You vs Computer";
-  document.getElementById("dashboard").style.display="none";
-  boardDiv.style.display="block";
+  dashboard.style.display="none";
+  statusEl.innerText = "System Game | You vs Computer | Playing...";
   initBoard();
 }
 
 // ==================== Random Online Game ====================
 async function startRandomGame(){
   onlineMode = true;
+  dashboard.style.display="none";
   statusEl.innerText = "Searching opponent...";
-  document.getElementById("dashboard").style.display="none";
-  boardDiv.style.display="block";
-  
-  // Create board first
   initBoard();
   myColor = "white"; // default
 
@@ -108,7 +114,7 @@ async function startRandomGame(){
         roomId = room.key;
         myColor = "black";
         update(ref(db,"rooms/"+roomId),{black:uid});
-        statusEl.innerText = "Online Game | You are BLACK";
+        statusEl.innerText = "Online Game | You are BLACK | Playing...";
       }
     });
   }
@@ -118,22 +124,10 @@ async function startRandomGame(){
     roomId = newRoom.key;
     myColor = "white";
     await set(newRoom,{white:uid, fen:"start"});
-    statusEl.innerText = "Waiting for opponent | You are WHITE";
+    statusEl.innerText = "Waiting for opponent | You are WHITE | Playing...";
   }
 
-  // Listen for moves
   listenMoves();
-}
-
-// ==================== Init Board ====================
-function initBoard(){
-  game = new Chess();
-  board = Chessboard("board",{
-    draggable:true,
-    position:"start",
-    orientation:myColor,
-    onDrop:onDrop
-  });
 }
 
 // ==================== Moves ====================
@@ -171,10 +165,11 @@ function listenMoves(){
     const fen = snap.val();
     if(fen && fen!==game.fen()){
       game.load(fen);
-      board.position(fen);
+      board.position(game.fen());
     }
   });
 }
 </script>
+
 </body>
-</html>
+</html>s
